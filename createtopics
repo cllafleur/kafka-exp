@@ -1,0 +1,2 @@
+docker exec -it  kafka-exp-kafka-1 kafka-topics.sh --create --partitions 8 --bootstrap-server localhost:9092 --topic test-p8
+docker exec -it  kafka-exp-kafka-1 kafka-topics.sh --create --partitions 4 --bootstrap-server localhost:9092 --topic test-p4
