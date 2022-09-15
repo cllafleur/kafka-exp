@@ -2,3 +2,5 @@
 **/*.egg-info
 .venv*
 venv*
+settings.json
+**/tags
