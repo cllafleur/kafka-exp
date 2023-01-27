@@ -1,5 +1,6 @@
+from abc import abstractmethod
 from kafka import KafkaConsumer, TopicPartition
-import kafka
+import pika
 import logging
 from logging import config
 import json
@@ -29,17 +30,17 @@ log_config = {
 config.dictConfig(log_config)
 kafkaLogger = logging.getLogger('consumer')
 
-conf=None
-consumer=None
-
 partitionNumber=None
 topicName=None
+broker=None
+consumer=None
 
 def getoptions():
     global partitionNumber
     global topicName
+    global broker
     try:
-        opts, args = getopt.getopt(sys.argv[1:], 'hp:t:', ['help', 'partitions=', 'topic='])
+        opts, args = getopt.getopt(sys.argv[1:], 'hp:t:b:', ['help', 'partitions=', 'topic=', 'broker='])
     except getopt.GetoptError as err:
         print(err)
         sys.exit(2)
@@ -55,6 +56,8 @@ def getoptions():
                 sys.exit(2)
         elif o in ('-t', '--topic'):
             topicName = a
+        elif o in ('-b', '--broker'):
+            broker = a
         else:
             assert False, "unhandled option"
 
@@ -64,27 +67,66 @@ def load_config():
         c = json.load(f)
     return c
 
-def initialize_consumer():
-    global consumer
-    consumer = KafkaConsumer(bootstrap_servers=conf['kafka']['servers'], group_id=conf['kafka']['consumers']['group_id'])
-    if partitionNumber:
-        consumer.assign([TopicPartition(topicName, p) for p in partitionNumber])
-    else:
-        consumer.subscribe(topicName)
-    kafkaLogger.info(f'bootstrap is connected {consumer.bootstrap_connected()}')
-    kafkaLogger.info(f'Current subscription {consumer.subscription()}')
-    kafkaLogger.info(f'Current assignment {consumer.assignment()}')
-
 prevcpt=0
 timer=1
 speed=0
 cpt=0
 def printStatus():
-    partition= [i.partition for i in consumer.assignment()]
+    partition= consumer.getAssignment()
     try:
         print(f'[partition: {partition}] {cpt}  {speed: >10} msg/s \r', end='')
     except:
         print('\r', end='')
+
+class MessageBroker:
+    def __init__(self, settings):
+        self.settings= settings
+
+    @abstractmethod
+    def initialize(self):
+        pass
+
+    @abstractmethod
+    def getMessages(self):
+        pass
+
+    def getAssignment(self):
+        return ['']
+
+class KafkaBroker(MessageBroker):
+    def initialize(self):
+        self.consumer = KafkaConsumer(bootstrap_servers=self.settings['kafka']['servers'], group_id=self.settings['kafka']['consumers']['group_id'])
+        if partitionNumber:
+            self.consumer.assign([TopicPartition(topicName, p) for p in partitionNumber])
+        else:
+            self.consumer.subscribe(topicName)
+        kafkaLogger.info(f'bootstrap is connected {self.consumer.bootstrap_connected()}')
+        kafkaLogger.info(f'Current subscription {self.consumer.subscription()}')
+        kafkaLogger.info(f'Current assignment {self.consumer.assignment()}')
+    
+    def getMessages(self):
+        for msg in self.consumer:
+           yield (msg.key, msg.value, msg.partition) 
+    
+    def getAssignment(self):
+        return [i.partition for i in self.consumer.assignment()]
+
+class RabbitmqBroker(MessageBroker):
+    def initialize(self):
+        parameters = pika.ConnectionParameters(host=self.settings['rabbitmq']['host'])
+        self.connection = pika.BlockingConnection(parameters)        
+        self.channel = self.connection.channel()
+
+    def getMessages(self):
+        queue_name = self.settings['rabbitmq']['queueName']
+        for method_frame, properties, body in self.channel.consume(queue_name, True):
+            #self.channel.basic_ack(method_frame.delivery_tag)
+            yield (None, body, None)
+
+brokers = {
+    'kafka': KafkaBroker,
+    'rabbitmq': RabbitmqBroker
+}
 
 def update_counter():
     global prevcpt
@@ -98,16 +140,19 @@ def update_counter():
 conf=load_config()
 topicName=conf['kafka']['topic']
 getoptions()
-initialize_consumer()
+consumer=brokers[broker](conf)
+consumer.initialize()
 handled=set()
 threading.Timer(timer, update_counter).start()
 
-for msg in consumer:
-    if not msg.key:
+for k, b, p in consumer.getMessages():
+    if not k:
+        cpt=cpt+1
+        #print(b)
         continue
-    key = msg.key.decode('utf-8')
+    key = k.decode('utf-8')
     cpt=cpt+1
     if key not in handled:
         handled.add(key)	
-        kafkaLogger.info(f'[partition: {msg.partition}] {key}')
+        kafkaLogger.info(f'[partition: {p}] {key}')
         printStatus()

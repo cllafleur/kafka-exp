@@ -4,3 +4,7 @@
 venv*
 settings.json
 **/tags
+**/bin
+**/obj
+**/.vs
+**/*.csproj.user

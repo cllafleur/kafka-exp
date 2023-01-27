@@ -25,6 +25,10 @@ services:
       - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=CLIENT
     depends_on:
       - zookeeper
+  rabbitmq:
+    image: rabbitmq:3
+    ports:
+      - 5672:5672
 
 volumes:
   zookeeper_data:

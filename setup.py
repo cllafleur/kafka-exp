@@ -5,5 +5,7 @@ setup(name='kafka-exp',
 	packages=find_packages(),
 	install_requires=[
 		'psycopg2-binary',
-		'kafka-python'
+		'kafka-python',
+		'pugsql',
+		'pika'
 	])
